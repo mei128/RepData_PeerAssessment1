@@ -10,7 +10,8 @@ This report is written as a Peer Review Project for the Reproducible Research co
 
 As usual, first we need some intialization code, in this case to load the libraries used: dplyr, for some table manipulations; hms, a convenient library to handle times without dates; and ggplot2 for charting.  
 
-``` {r message = FALSE}
+
+```r
 # Required libraries
 library(dplyr)
 library(hms)
@@ -22,7 +23,8 @@ library(ggplot2)
 
 Data is assumed readily available at list as a zip file pulled from the repository and, very likely, already expanded to a csv, so there is no need to expand it every time. Reading is pretty straight forward.  
 
-```{r}
+
+```r
 sfile <- "activity.csv"
 sZIP  <- "activity.ZIP"
 
@@ -39,7 +41,8 @@ Once we have the data, we need a little tidying to make it easier to use:
 * A new var is added identifying the day as weekday or weekend. The locale is previously set to English, so we check for Saturday and Sunday instead of sábado and domingo (which don't make sense to most in this class).  
   
   
-```{r results = "hide"}
+
+```r
 # Mutate base data to get workable vars: date and hms
 
 Sys.setlocale(category = "LC_TIME",locale = "English") # weekday in English
@@ -57,7 +60,8 @@ srcdata$day <- factor(srcdata$day,levels=c(TRUE,FALSE),labels = c("Weekend","Wee
 
 To calculate the mean number of steps taken per day, we need first to group all data per day, and then totalize removing any NAs in the dataset. Mean and median per day are then easily obtained.  
 
-```{r}
+
+```r
 # Group per day and get total steps, mean and median
 pltdata <- srcdata %>% group_by(date) %>% summarize(steps=sum(steps, na.rm=TRUE))
 pltdata <- as.data.frame(pltdata) # to avoid warning bug in dplyr
@@ -65,9 +69,10 @@ stpmean <- mean(pltdata$steps)
 stpmed  <- median(pltdata$steps)
 ```
 
-The subject walked a **mean of `r stpmean` steps per day**. The chart below shows a histogram of the total steps taken per day, and the mean and median points are identified as vertical bars in the chart.
+The subject walked a **mean of 9354.2295082 steps per day**. The chart below shows a histogram of the total steps taken per day, and the mean and median points are identified as vertical bars in the chart.
 
-```{r}
+
+```r
 # Plot histogram and overlay median and mean values
 g1 <- ggplot(pltdata,aes(steps))+
       geom_histogram(bins = 10, fill = "navy", col = "grey80")+
@@ -82,13 +87,16 @@ g1 <- ggplot(pltdata,aes(steps))+
 
 print(g1)
 ```
+
+![](PA1_template_files/figure-html/unnamed-chunk-5-1.png)<!-- -->
   
 
 ## What is the average daily activity pattern?
 
 To calculate average daily patterns we have to group data per interval and then obtain the mean, always removing NAs. The chart below shows a pattern with higher activity in the morning, and other lower peaks by mid day, afternoon, and early evening. We do not have enough information to asses the reason for these peaks, but they are congruent with daily commutes, lunch breaks, and fixed exercise hours.
 
-```{r}
+
+```r
 # Group by interval and get mean steps across all days
 pltdata <- srcdata %>% group_by(interval) %>% summarize(steps=mean(steps, na.rm = TRUE))
 pltdata <- as.data.frame(pltdata) # to avoid warning bug in dplyr
@@ -105,16 +113,18 @@ g2 <- ggplot(pltdata,aes(x=interval,y=steps))+
       theme_bw()
 
 print(g2)
-
 ```
 
-The highest activity interval corresponds to **`r maxlbl` with `r round(maxY,0)` steps** in the interval.
+![](PA1_template_files/figure-html/unnamed-chunk-6-1.png)<!-- -->
+
+The highest activity interval corresponds to **08:35:00 - 08:40:00 with 206 steps** in the interval.
   
 ## Imputing missing values
 
-The dataset contains a total of **`r sum(is.na(srcdata$steps))` missing values**. We impute missing values with the mean of the interval in similar days, week-end or week day, for what we have developed our own impute function, since the default impute methods do not consider columns other than the affected (my knowledge of R universe is rather limited).
+The dataset contains a total of **2304 missing values**. We impute missing values with the mean of the interval in similar days, week-end or week day, for what we have developed our own impute function, since the default impute methods do not consider columns other than the affected (my knowledge of R universe is rather limited).
 
-```{r}
+
+```r
 # function to get mean steps of similar interval and weekday
 
 myMean <- function(interval, day)
@@ -136,7 +146,8 @@ impdata <- myImpute(srcdata)
 
 With the new imputed dataset we can repeat the histogram of total daily activity, and we see that mean and median have not changed significantly, the frequency of low activity days has dropped over 7 points, while the frequency of high activity days has increased over 5 points.
 
-```{r}
+
+```r
 # Group per day and get total steps, mean and median
 pltdata <- impdata %>% group_by(date) %>% summarize(steps=sum(steps))
 pltdata <- as.data.frame(pltdata) # to avoid warning bug in dplyr
@@ -157,13 +168,16 @@ g3 <- ggplot(pltdata,aes(steps))+
 
 print(g3)
 ```
+
+![](PA1_template_files/figure-html/unnamed-chunk-8-1.png)<!-- -->
   
 
 ## Are there differences in activity patterns between weekdays and weekends?
 
 Plotting together the activty patterns for weekdays and weekends, we can see that the morning peak is lower on weekends, followed by higher activity all day long, what is congruent with a sedentary type of work (office or similar) that shows lower activity during working hours on weekdays, and higher physical activity on weekends.
 
-```{r}
+
+```r
 # Group by weekday and interval and get mean steps across all days
 pltdata <- impdata %>% group_by(day,interval) %>% summarize(steps=mean(steps))
 pltdata <- as.data.frame(pltdata) # to avoid warning bug in dplyr
@@ -176,6 +190,8 @@ g4 <- ggplot(pltdata,aes(x=interval,y=steps, col=day))+
 
 print(g4)
 ```
+
+![](PA1_template_files/figure-html/unnamed-chunk-9-1.png)<!-- -->
   
 
 ## Conclusion and Comments
