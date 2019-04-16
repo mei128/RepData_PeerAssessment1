@@ -1,9 +1,10 @@
 ## Scratch scripting
 #########1#########2#########3#########4#########5#########6#########7#########8
+
+# Required libraries
 library(dplyr)
 library(ggplot2)
 library(hms)
-library(mlr)
 
 ## Loading and preprocessing the data
 
@@ -89,8 +90,6 @@ myImpute <- function(data){
 
 
 impdata <- myImpute(srcdata)
-
-#impdata <- impute(srcdata, cols = list(steps=imputeMedian()))$data
 
 # Group per day and get total steps, mean and median
 pltdata <- impdata %>% group_by(date) %>% summarize(steps=sum(steps))

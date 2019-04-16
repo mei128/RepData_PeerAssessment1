@@ -4,37 +4,178 @@ output:
   html_document:
     keep_md: true
 ---
+## Introduction
+This report is written as a Peer Review Project for the Reproducible Research course, which is part of the Data Science Specialization program from [JHU](https://www.jhu.edu). It will show the use of R Markdown with some embedded code as a way to publish reproducible research, but the test is mostly a filler.  
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nam vulputate tortor libero, nec maximus tellus varius id. Etiam porta dui libero, non rhoncus dolor feugiat eget. Quisque sagittis laoreet augue, vitae sollicitudin leo maximus ut. Mauris dignissim turpis id aliquam feugiat. Curabitur lacinia eu justo at gravida.  
+As usual, first we need some intialization code, in this case to load the libraries used: dplyr, for some table manipulations; hms, a convenient library to handle times without dates; and ggplot2 for charting.
+
+``` {r message = FALSE}
+# Required libraries
+library(dplyr)
+library(hms)
+library(ggplot2)
+```
 
 ## Loading and preprocessing the data
-Data is assumed readily available as a .csv file in your working directory. Reading it is pretty straight forward.
 
+Data is assumed readily available at list as a zip file pulled from the repository and, very likely, already expanded to a csv, so there is no need to expand it every time. Reading is pretty straight forward.
+
+```{r}
+sfile <- "activity.csv"
+sZIP  <- "activity.ZIP"
+
+if (!file.exists(sfile)) unzip(sZIP)
+
+# Read csv file 
+srcdata <- read.csv("activity.csv",stringsAsFactors = FALSE)
+```
+
+Once we have the data, we need a little tidying to make it easier to use:  
+* Dates are read as strings and converted to dates.  
+* Intervals are read as numbers, with hundreds representing hours and the reminder minutes, and are converted to hours (hms class).  
+* A new var is added identifying the day as weekday or weekend. The locale is previously set to English, so we check for Saturday and Sunday instead of sábado and domingo (which don't make sense to most in this class).  
+
+```{r results = "hide"}
+# Mutate base data to get workable vars: date and hms
+
+Sys.setlocale(category = "LC_TIME",locale = "English") # weekday in English
+
+srcdata <- mutate(srcdata,
+                  date     = as.Date(date),
+                  interval = hms(hours = interval%/%100, minutes = interval%%100),
+                  day      = weekdays(date) %in% c("Saturday","Sunday"))
+
+srcdata$day <- factor(srcdata$day,levels=c(TRUE,FALSE),labels = c("Weekend","Weekday"))
+```
 
 
 ## What is mean total number of steps taken per day?
 
+To calculate the mean number of steps taken per day, we need first to group all data per day, and then totalize removing any NAs in the dataset. Mean and median per day are then easily obtained.
+
+```{r}
+# Group per day and get total steps, mean and median
+pltdata <- srcdata %>% group_by(date) %>% summarize(steps=sum(steps, na.rm=TRUE))
+pltdata <- as.data.frame(pltdata) # to avoid warning bug in dplyr
+stpmean <- mean(pltdata$steps)
+stpmed  <- median(pltdata$steps)
+```
+
+The subject walked a **mean of `r stpmean` steps per day**. The chart below shows a histogram of the total steps taken per day, and the mean and median points are identified as vertical bars in the chart.
+
+```{r}
+# Plot histogram and overlay median and mean values
+g1 <- ggplot(pltdata,aes(steps))+
+      geom_histogram(bins = 10, fill = "navy", col = "grey80")+
+      geom_vline(xintercept = stpmean, lwd=1, col = "red")+
+      geom_text(aes(x=18000, y=13, label = paste0("Mean   ",stpmean)),adj=0)+
+      geom_segment(aes(x=16000, xend=17000 ,y=13, yend=13), lwd=1, col ="red")+
+      geom_vline(xintercept = stpmed, lwd=1, col = "cyan")+
+      geom_text(aes(x=18000, y=14, label = paste0("Median ",stpmed)),adj=0)+
+      geom_segment(aes(x=16000, xend=17000 ,y=14, yend=14), lwd=1, col ="cyan")+
+      xlab("Steps/day")+ylab("Frequency")+ggtitle("Histogram of total activity")+
+      theme_bw()
+
+print(g1)
+```
 
 
 ## What is the average daily activity pattern?
 
+To calculate average daily patterns we have to group data per interval and then obtain the mean, always removing NAs. The chart below shows a pattern with higher activity in the morning, and other lower peaks by mid day, afternoon, and early evening. We do not have enough information to asses the reason for these peaks, but they are congruent with daily commutes, lunch breaks, and fixed exercise hours.
 
+```{r}
+# Group by interval and get mean steps across all days
+pltdata <- srcdata %>% group_by(interval) %>% summarize(steps=mean(steps, na.rm = TRUE))
+pltdata <- as.data.frame(pltdata) # to avoid warning bug in dplyr
+maxidx  <- which.max(pltdata$steps)
+maxX    <- pltdata$interval[maxidx+5]             # Overlay X
+maxY    <- pltdata$steps[maxidx]                  # Overlay y
+maxlbl  <- paste0(pltdata$interval[maxidx]," - ", # Overlay txt
+                  pltdata$interval[maxidx+1])
+
+g2 <- ggplot(pltdata,aes(x=interval,y=steps))+
+      geom_line(lwd=1,col="coral2")+
+      geom_text(aes(x=maxX, y=maxY, label = paste0("Highest activity interval ",maxlbl)),adj=0)+
+      xlab("Interval")+ylab("Steps")+ggtitle("Mean daily activity")+
+      theme_bw()
+
+print(g2)
+
+```
+
+The highest activity interval corresponds to **`r maxlbl` with `r round(maxY,0)` steps** in the interval.
 
 ## Imputing missing values
 
+The dataset contains a total of **`r sum(is.na(srcdata$steps))` missing values**. We impute missing values with the mean of the interval in similar days, week-end or week day, for what we have developed our own impute function, since the default impute methods do not consider columns other than the affected (my knowledge of R universe is rather limited).
+
+```{r}
+# function to get mean steps of similar interval and weekday
+
+myMean <- function(interval, day)
+    round(mean(srcdata$steps[(srcdata$interval == interval) & 
+                       (srcdata$day      == day)],na.rm = TRUE),0)
+
+myImpute <- function(data){
+    imputed <- apply(data,1,function (x)
+        ifelse(is.na(x[["steps"]]),
+               myMean(as.hms(x[["interval"]]),x[["day"]]),
+               as.integer(x[["steps"]])))
+    data$steps <- imputed
+    return(data)
+}
+
+
+impdata <- myImpute(srcdata)
+```
+
+With the new imputed dataset we can repeat the histogram of total daily activity, and we see that mean and median have not changed significantly, the frequency of low activity days has dropped over 7 points, while the frequency of high activity days has increased over 5 points.
+
+```{r}
+# Group per day and get total steps, mean and median
+pltdata <- impdata %>% group_by(date) %>% summarize(steps=sum(steps))
+pltdata <- as.data.frame(pltdata) # to avoid warning bug in dplyr
+stpmean <- mean(pltdata$steps)
+stpmed  <- median(pltdata$steps)
+
+# Plot histogram and overlay median and mean values
+g3 <- ggplot(pltdata,aes(steps))+
+      geom_histogram(bins = 10, fill = "steelblue", col = "grey80")+
+      geom_vline(xintercept = stpmean, lwd=1, col = "red")+
+      geom_text(aes(x=18000, y=13, label = paste0("Mean   ",stpmean)),adj=0)+
+      geom_segment(aes(x=16000, xend=17000 ,y=13, yend=13), lwd=1, col ="red")+
+      geom_vline(xintercept = stpmed, lwd=1, col = "cyan")+
+      geom_text(aes(x=18000, y=14, label = paste0("Median ",stpmed)),adj=0)+
+      geom_segment(aes(x=16000, xend=17000 ,y=14, yend=14), lwd=1, col ="cyan")+
+      xlab("Steps/day")+ylab("Frequency")+ggtitle("Histogram of total activity (imputed data)")+
+      theme_bw()
+
+print(g3)
+```
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
 
+Plotting together the activty patterns for weekdays and weekends, we can see that the morning peak is lower on weekends, followed by higher activity all day long, what is congruent with a sedentary type of work (office or similar) thst shows lower activity during working hours on weekdays, and higher physical activity on weekends.
 
+```{r}
+# Group by weekday and interval and get mean steps across all days
+pltdata <- impdata %>% group_by(day,interval) %>% summarize(steps=mean(steps))
+pltdata <- as.data.frame(pltdata) # to avoid warning bug in dplyr
+
+g4 <- ggplot(pltdata,aes(x=interval,y=steps, col=day))+
+      geom_line(lwd=1)+
+      xlab("Interval")+ylab("Steps")+ggtitle("Mean daily activity")+
+      facet_wrap(.~day, nrow = 2)+
+      theme_bw()
+
+print(g4)
+```
+
+
+## Conclusion
+
+This is neat (or knit).  
 
 Quisque vestibulum commodo libero, quis imperdiet sapien mattis ac. Mauris nec fringilla erat. Suspendisse eget condimentum dui. Morbi eget laoreet neque. Curabitur tristique in sem ultricies tempus. In hac habitasse platea dictumst. Vivamus nec diam sit amet felis consequat mattis eu sed arcu. Nullam ipsum risus, euismod nec ligula at, bibendum feugiat lacus. Sed augue erat, dictum non varius eget, pharetra sed ipsum. Orci varius natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. 
-Integer varius elit ut quam elementum dictum. Suspendisse potenti. Quisque et pulvinar neque. Curabitur eu purus quam. Quisque tempor vehicula vulputate. Curabitur sed massa vel metus aliquet tempus. Praesent quis rhoncus sem. Nam vehicula in ipsum ac pharetra. Aliquam condimentum enim lorem, sed interdum nibh imperdiet id. Maecenas tristique venenatis lorem, vel condimentum odio viverra a. Quisque fringilla nulla urna, quis interdum ligula dictum dapibus. 
-Suspendisse in accumsan tortor. Fusce imperdiet quis mauris eu faucibus. Donec at dolor accumsan, luctus nisl quis, tincidunt arcu. Morbi molestie in orci ac egestas. Morbi lobortis vehicula posuere. Proin a neque sed leo dignissim iaculis eu vitae justo. Praesent purus lorem, congue in egestas rhoncus, accumsan sit amet lacus. Morbi hendrerit ipsum quis leo condimentum efficitur. Integer ac lobortis risus. Nulla sollicitudin, sem at laoreet facilisis, nisl magna mattis nulla, ut rutrum mauris orci sed velit. Praesent feugiat commodo neque at sagittis. Nulla odio massa, euismod malesuada lorem id, tempor viverra tellus. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas ultrices quam vitae est volutpat suscipit. Nunc sed felis aliquet, dictum sem pretium, blandit justo. 
-Nulla rhoncus, purus at cursus euismod, neque nulla scelerisque neque, eu scelerisque ante nibh vel ligula. Nam gravida in tellus ut efficitur. Suspendisse vulputate justo mollis massa aliquam sagittis. Quisque bibendum mi at urna egestas vestibulum. Morbi congue lacus justo, eget consequat ante sagittis ac. Fusce quis ante a metus aliquam elementum sed at dolor. Donec condimentum vitae magna a convallis. Duis justo justo, dapibus eu nisi id, rutrum lobortis orci. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia Curae; Aliquam nisl metus, porttitor ac quam a, fringilla faucibus tortor. Maecenas in faucibus arcu, non lobortis lectus. Morbi sed risus rutrum, consectetur lorem ac, mattis ipsum. Sed elementum felis eros, ac dapibus turpis tincidunt vitae. 
-Nulla nisi velit, mollis vel laoreet eu, placerat non leo. Vivamus at rutrum metus. Phasellus pretium lobortis risus, non euismod tellus scelerisque vel. Donec scelerisque semper mauris sed laoreet. Cras est nunc, sodales eu volutpat eget, scelerisque facilisis turpis. Quisque in sollicitudin orci. Duis lobortis, est ac finibus bibendum, felis lectus pulvinar odio, porttitor consectetur diam turpis vitae dui. Cras varius eros eu tellus tempor, sed aliquam felis mattis. Morbi sit amet felis commodo, semper augue at, pretium metus. Quisque iaculis mattis bibendum. Integer pharetra, tortor et porttitor pharetra, erat nulla tincidunt risus, id pulvinar lectus nisl in ante. Fusce convallis neque et magna lobortis sagittis. Proin faucibus erat in auctor convallis. 
-Sed malesuada leo finibus tellus fringilla, a egestas odio placerat. Sed commodo dolor eu dolor pharetra egestas. Donec at lectus sit amet turpis pretium viverra in id felis. Pellentesque pellentesque lacinia finibus. Phasellus justo enim, faucibus posuere aliquam non, facilisis a ex. Ut venenatis nisi augue, at gravida neque egestas vel. Duis at enim interdum, dictum est eu, pulvinar est. Lorem ipsum dolor sit amet, consectetur adipiscing elit. 
-Donec et scelerisque ligula, at tempor ante. Nunc tempus tortor tincidunt tortor molestie, pulvinar eleifend lectus molestie. Cras mattis iaculis suscipit. Mauris suscipit erat eget dapibus imperdiet. Morbi gravida magna neque, eu aliquet elit ullamcorper in. Etiam fringilla metus ipsum, ut dapibus lacus venenatis vitae. Maecenas gravida turpis sit amet ligula porttitor, ac pretium dolor rutrum. Nunc viverra dui eu nulla luctus ornare. 
-Suspendisse lobortis sed risus nec sodales. Vivamus vitae suscipit felis, quis rutrum velit. Interdum et malesuada fames ac ante ipsum primis in faucibus. Aenean sed condimentum nunc. Suspendisse scelerisque, orci nec consequat gravida, urna est ullamcorper nisl, eget maximus ipsum sem at libero. Fusce laoreet erat et hendrerit scelerisque. Nulla scelerisque, enim in fringilla euismod, quam elit scelerisque turpis, a molestie dui mauris ac enim. Vestibulum aliquet orci in dolor vulputate, quis vestibulum quam scelerisque. Ut eget convallis massa. Quisque arcu sem, maximus non suscipit sed, finibus sit amet nisl. Curabitur faucibus condimentum odio eu sollicitudin. Suspendisse efficitur, nunc in tempor posuere, lectus diam tristique quam, in ultrices nibh erat in neque. 
-Suspendisse potenti. Nam velit augue, gravida sit amet lorem a, semper pretium tortor. Maecenas eleifend sed augue sit amet vulputate. Maecenas gravida a lectus eu dictum. Donec dignissim turpis vitae imperdiet porta. Aliquam eget purus aliquet, iaculis dui a, auctor ante. Phasellus mollis dictum tellus id interdum. Cras sit amet nulla nec justo faucibus imperdiet non quis neque. Duis at posuere est. 
-Etiam sollicitudin hendrerit magna, non malesuada dolor vehicula id. Duis fermentum laoreet neque a volutpat. Nam a sapien sit amet nibh suscipit interdum. Ut magna nulla, molestie a efficitur quis, posuere quis est. Integer accumsan cursus urna, feugiat rhoncus metus molestie non. Morbi tempor lorem a maximus finibus. Sed sit amet cursus eros. Integer imperdiet, nunc eget gravida molestie, leo turpis placerat magna, ac consectetur nisi dolor ut sem. Fusce sit amet condimentum libero. Phasellus pellentesque metus vel lacus consectetur, vitae vulputate arcu feugiat. Proin ut vehicula ligula, non blandit urna. Quisque imperdiet purus et mi laoreet tincidunt. Nullam enim felis, aliquet lacinia magna eu, sagittis pretium magna. Fusce malesuada risus eu posuere vehicula. 
